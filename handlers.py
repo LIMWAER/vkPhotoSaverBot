@@ -2,35 +2,19 @@ import logging
 
 from downloader import downloader
 from reply_keyboard import markup, markup_remove
-from load_all import dp, api
+from load_all import dp
 from aiogram import types
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Text
 from aiovk.exceptions import VkAPIError
-from config import VK_API_VER
+from vk_func import get_group_id, get_photos, get_album_ids, complete_albums
 
 
 class Form(StatesGroup):
     waiting_group_name = State()
     waiting_permission = State()
-
-
-async def get_group_id(group_name: str):
-    group_info = api('groups.getById', group_id=group_name, v=VK_API_VER)
-    group_list = await group_info()
-    group_id = group_list[0]['id']
-    return -group_id
-
-
-async def get_album_ids(group_id: int):
-    album_list_ids = []
-    albums_info = api('photos.getAlbums', owner_id=group_id, v=VK_API_VER)
-    all_albums_dict = await albums_info()
-    all_albums_list = all_albums_dict['items']
-    for album in all_albums_list:
-        album_list_ids.append(album['id'])
-    return album_list_ids
+    saving_album_dict = State()
 
 
 # TODO: make default state(menu)
@@ -48,8 +32,8 @@ async def greeting(message: types.Message):
 @dp.message_handler(Text(equals='cancel', ignore_case=True), state='*')
 async def cancel_handler(message: types.Message, state: FSMContext):
     """
-    Allow user to cancel any action
-    """
+        Allow user to cancel any action
+        """
     current_state = await state.get_state()
     if current_state is None:
         return
@@ -74,9 +58,15 @@ async def get_all_albums(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     try:
         group_id = await get_group_id(user_data['group_name'])
+        await state.update_data(group_id=group_id)
         album_list_id = await get_album_ids(group_id)
+        await state.update_data(album_list_id=album_list_id)
         text = f'Всего альбомов: {len(album_list_id)}'
         await message.reply(text)
+
+        current_state = await state.get_state()
+        logging.info('Current state %r', current_state)
+
         await Form.next()
         text = f'Скачать альбомы?'
         await message.answer(text, reply_markup=markup)
@@ -88,11 +78,26 @@ async def get_all_albums(message: types.Message, state: FSMContext):
 
 @dp.message_handler(lambda message: message.text.lower() == 'да', state=Form.waiting_permission)
 async def downloading_albums(message: types.Message, state: FSMContext):
-    # TODO: send data to downloader
-    # downloader()
+
+    current_state = await state.get_state()
+    logging.info('Current state %r', current_state)
+
+    user_data = await state.get_data()
+    group_id = user_data['group_id']
+    album_list_id = user_data['album_list_id']
+    all_album_dict = await get_photos(group_id,  album_list_id)
+    await state.update_data(all_album_dict=all_album_dict)
+    all_albums = await complete_albums(all_album_dict)
+    text = f'Скачивание началось.\n' \
+           f'Проверьте папку "Загрузки".'
+    await message.answer(text, reply_markup=markup_remove)
+    downloader(all_albums)
     await state.finish()
 
 
 @dp.message_handler(lambda message: message.text.lower() == 'нет', state=Form.waiting_permission)
 async def return_to_default_state(message: types.Message, state: FSMContext):
     await state.finish()
+
+    current_state = await state.get_state()
+    logging.info('Current state %r', current_state)

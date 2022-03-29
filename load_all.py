@@ -16,6 +16,5 @@ logging.basicConfig(format=u'%(filename)s [LINE:%(lineno)d] #%(levelname)-8s [%(
 storage = MemoryStorage()
 bot = Bot(token=TG_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot, storage=storage)
-loop = asyncio.get_event_loop()
 session = TokenSession(access_token=VK_TOKEN)
 api = LazyAPI(session)
